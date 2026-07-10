@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { useState, FormEvent, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 
 /* =========================================================
    Types
@@ -56,8 +56,9 @@ const NEUTRAL = {
 
 type Mode = "login" | "signup";
 
-export default function LoginPage() {
+function LoginPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   const [mode, setMode] = useState<Mode>("login");
   const [role, setRole] = useState<Role>("parent");
@@ -81,7 +82,13 @@ export default function LoginPage() {
     setConfirmPassword("");
   }
 
-  function handleSubmit(e: FormEvent) {
+  function goAfterAuth(redirect: string) {
+    const next = searchParams.get("next");
+    router.push(next && next.startsWith("/") ? next : redirect);
+    router.refresh();
+  }
+
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
 
@@ -107,11 +114,32 @@ export default function LoginPage() {
     }
 
     setLoading(true);
-    // لا توجد قاعدة بيانات بعد — هذه محاكاة لتسجيل الدخول / إنشاء الحساب فقط
-    window.setTimeout(() => {
+    try {
+      const endpoint = isSignup ? "/api/auth/signup" : "/api/auth/login";
+      const body = isSignup
+        ? { fullName: fullName.trim(), email: email.trim(), password, role }
+        : { email: email.trim(), password };
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "وقع خطأ، حاول مرة أخرى");
+        setLoading(false);
+        return;
+      }
+
+      goAfterAuth(data.redirect || selectedRole.route);
+    } catch (err) {
+      console.error(err);
+      setError("تعذر الاتصال بالخادم، تأكد من الاتصال وحاول مرة أخرى");
       setLoading(false);
-      router.push(selectedRole.route);
-    }, 700);
+    }
   }
 
   function handleQuickDemo(r: RoleMeta) {
@@ -158,7 +186,7 @@ export default function LoginPage() {
           <div className="login-card">
             <div className="login-head">
               <h2>{isSignup ? "إنشاء حساب جديد" : "تسجيل الدخول"}</h2>
-              <span className="demo-tag">نسخة تجريبية — بلا قاعدة بيانات</span>
+              <span className="demo-tag">متصلة بقاعدة البيانات</span>
             </div>
 
             {/* Login / Signup toggle */}
@@ -308,7 +336,7 @@ export default function LoginPage() {
 
             {!isSignup && (
               <div className="quick-demo">
-                <span>دخول سريع للتجربة:</span>
+                <span>دخول سريع للتجربة (بعد تشغيل seed):</span>
                 <div className="quick-demo-btns">
                   {ROLES.map((r) => (
                     <button key={r.id} type="button" onClick={() => handleQuickDemo(r)}>
@@ -321,7 +349,7 @@ export default function LoginPage() {
           </div>
 
           <footer className="login-footer">
-            هذه صفحة تجريبية للعرض فقط — جميع البيانات مؤقتة في المتصفح ولا يتم حفظها في أي قاعدة بيانات.
+            متصلة بقاعدة بيانات MySQL حقيقية (fadaa_al_tifl) — الحسابات والجلسات فعلية.
           </footer>
         </div>
       </div>
@@ -481,8 +509,8 @@ export default function LoginPage() {
         }
         .demo-tag {
           font-size: 11px;
-          background: #fff3e0;
-          color: #9a6b00;
+          background: #eaf5ee;
+          color: #2f6b45;
           padding: 3px 9px;
           border-radius: 999px;
           font-weight: 600;
@@ -687,5 +715,13 @@ export default function LoginPage() {
         }
       `}</style>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageInner />
+    </Suspense>
   );
 }
