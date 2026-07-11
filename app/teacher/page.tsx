@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import LogoutButton from "@/components/LogoutButton";
 
 /* =========================================================
    Types
@@ -9,10 +11,10 @@ type AttStatus = "present" | "absent" | "late";
 type TabId = "students" | "attendance" | "lessons" | "note" | "schedule";
 
 interface Subject {
-  id: string;
+  id: number;
   name: string;
   icon: string;
-  color: string; // CSS var, e.g. "var(--sage)"
+  color: string;
 }
 
 interface Student {
@@ -23,6 +25,7 @@ interface Student {
 }
 
 interface LessonFeedItem {
+  id: number;
   icon: string;
   subject: string;
   title: string;
@@ -31,6 +34,7 @@ interface LessonFeedItem {
 }
 
 interface NoteFeedItem {
+  id: number;
   icon: string;
   student: string;
   type: string;
@@ -39,6 +43,7 @@ interface NoteFeedItem {
 }
 
 interface Notification {
+  id: number;
   icon: string;
   color: string;
   title: string;
@@ -57,21 +62,7 @@ const ATT_LABELS: Record<AttStatus, string> = {
   late: "متأخر",
 };
 
-const SUBJECTS: Subject[] = [
-  { id: "arabic", name: "اللغة العربية", icon: "🅰️", color: "var(--sage)" },
-  { id: "math", name: "الرياضيات", icon: "➗", color: "var(--sky)" },
-  { id: "art", name: "النشاط الفني", icon: "🎨", color: "var(--blush)" },
-  { id: "behavior", name: "السلوك", icon: "🌟", color: "var(--sun)" },
-];
-
-const INITIAL_STUDENTS: Student[] = [
-  { id: 1, name: "ريم بلحاج", seed: "Rim", points: 24 },
-  { id: 2, name: "يوسف قادري", seed: "Youcef", points: 19 },
-  { id: 3, name: "ملاك حمدي", seed: "Malak", points: 27 },
-  { id: 4, name: "عادل زروقي", seed: "Adel", points: 15 },
-  { id: 5, name: "لينة بوزيد", seed: "Lina", points: 22 },
-];
-
+// جدول الحصص لسع ماعندوش جدول ديال قاعدة البيانات — باقي ثابت (static) حاليًا
 const SCHEDULE_DAYS = ["السبت", "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس"];
 const SCHEDULE_SLOTS = ["08:00-09:00", "09:00-10:00", "10:15-11:15", "11:15-12:15"];
 const SCHEDULE_GRID: (ScheduleCell | null)[][] = [
@@ -95,106 +86,196 @@ function todayISO(): string {
 }
 
 export default function TeacherPage() {
+  const router = useRouter();
+
   /* ---------------- profile / nav ---------------- */
-  const [teacherName] = useState("الأستاذة سارة عمراني");
-  const [className] = useState("النجوم الصغيرة");
+  const [teacherName, setTeacherName] = useState("");
+  const [className, setClassName] = useState("");
+  const [classId, setClassId] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>("students");
   const [notifOpen, setNotifOpen] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
 
   /* ---------------- data ---------------- */
-  const [students] = useState<Student[]>(INITIAL_STUDENTS);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [subjects, setSubjects] = useState<Subject[]>([]);
   const [attendanceToday, setAttendanceToday] = useState<Record<number, AttStatus>>({});
   const [attDate, setAttDate] = useState(todayISO());
+  const [savingAttendance, setSavingAttendance] = useState(false);
 
-  const [lessonsFeed, setLessonsFeed] = useState<LessonFeedItem[]>([
-    { icon: "🎨", subject: "النشاط الفني", title: "نشاط الألوان الأساسية", desc: "تعرّف الأطفال على الألوان الأولية عبر الرسم", date: "قبل يومين" },
-  ]);
-  const [newLessonSubject, setNewLessonSubject] = useState(SUBJECTS[0].id);
+  const [lessonsFeed, setLessonsFeed] = useState<LessonFeedItem[]>([]);
+  const [newLessonSubject, setNewLessonSubject] = useState<number | null>(null);
   const [newLessonTitle, setNewLessonTitle] = useState("");
   const [newLessonDesc, setNewLessonDesc] = useState("");
 
-  const [notesFeed, setNotesFeed] = useState<NoteFeedItem[]>([
-    { icon: "👍", student: "ريم بلحاج", type: "إيجابية", text: "شاركت بحماس في نشاط اليوم", date: "أمس" },
-  ]);
-  const [noteStudentId, setNoteStudentId] = useState(students[0].id);
+  const [notesFeed, setNotesFeed] = useState<NoteFeedItem[]>([]);
+  const [noteStudentId, setNoteStudentId] = useState<number | null>(null);
   const [noteTypeValue, setNoteTypeValue] = useState(NOTE_TYPES[0].value);
   const [noteText, setNoteText] = useState("");
 
-  const [notifications, setNotifications] = useState<Notification[]>([
-    { icon: "📘", color: "var(--sage)", title: "تم نشر نشاط جديد للقسم", time: "قبل يومين", read: true },
-  ]);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+
+  /* ---------------- initial load ---------------- */
+  useEffect(() => {
+    async function load() {
+      try {
+        const meRes = await fetch("/api/auth/me");
+        const meData = await meRes.json();
+        if (!meData.user) {
+          router.push("/login");
+          return;
+        }
+        setTeacherName(meData.user.fullName);
+
+        const [studentsRes, subjectsRes, lessonsRes, notesRes, notifRes] = await Promise.all([
+          fetch("/api/teacher/students"),
+          fetch("/api/teacher/subjects"),
+          fetch("/api/teacher/lessons"),
+          fetch("/api/teacher/notes"),
+          fetch("/api/teacher/notifications"),
+        ]);
+
+        const studentsData = await studentsRes.json();
+        const subjectsData = await subjectsRes.json();
+        const lessonsData = await lessonsRes.json();
+        const notesData = await notesRes.json();
+        const notifData = await notifRes.json();
+
+        setClassId(studentsData.classId);
+        setClassName(studentsData.className || "بلا قسم بعد");
+        setStudents(studentsData.students || []);
+        setSubjects(subjectsData.subjects || []);
+        if (subjectsData.subjects?.[0]) setNewLessonSubject(subjectsData.subjects[0].id);
+        if (studentsData.students?.[0]) setNoteStudentId(studentsData.students[0].id);
+        setLessonsFeed(lessonsData.lessons || []);
+        setNotesFeed(notesData.notes || []);
+        setNotifications(notifData.notifications || []);
+      } catch (err) {
+        console.error(err);
+        setLoadError("تعذر تحميل بيانات القسم، تأكد من الاتصال بقاعدة البيانات");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ---------------- attendance for selected date ---------------- */
+  const loadAttendance = useCallback(async (date: string) => {
+    const res = await fetch(`/api/teacher/attendance?date=${date}`);
+    const data = await res.json();
+    setAttendanceToday(data.statusByStudent || {});
+  }, []);
+
+  useEffect(() => {
+    if (!loading) loadAttendance(attDate);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [attDate, loading]);
 
   /* ---------------- helpers ---------------- */
-  function pushNotification(icon: string, color: string, title: string) {
-    setNotifications((prev) => [...prev, { icon, color, title, time: "الآن", read: false }]);
-  }
-
-  function toggleNotifPanel() {
-    setNotifOpen((open) => {
-      const next = !open;
-      if (next) {
-        setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-      }
-      return next;
-    });
+  async function toggleNotifPanel() {
+    const next = !notifOpen;
+    setNotifOpen(next);
+    if (next) {
+      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+      await fetch("/api/teacher/notifications", { method: "PATCH" });
+    }
   }
 
   function setStudentStatus(studentId: number, status: AttStatus) {
     setAttendanceToday((prev) => ({ ...prev, [studentId]: status }));
   }
 
-  function handleAddLesson() {
-    const subj = SUBJECTS.find((s) => s.id === newLessonSubject)!;
+  async function handleAddLesson() {
+    const subj = subjects.find((s) => s.id === newLessonSubject);
     const title = newLessonTitle.trim();
-    if (!title) {
+    if (!subj || !title) {
       alert("يرجى إدخال عنوان النشاط أو الدرس");
       return;
     }
+    const res = await fetch("/api/teacher/lessons", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ subjectId: subj.id, title, desc: newLessonDesc.trim() }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || "تعذر إضافة الدرس");
+      return;
+    }
     setLessonsFeed((prev) => [
-      { icon: subj.icon, subject: subj.name, title, desc: newLessonDesc.trim() || "بدون وصف إضافي", date: "الآن" },
+      { id: Date.now(), icon: subj.icon, subject: subj.name, title, desc: newLessonDesc.trim() || "بدون وصف إضافي", date: "الآن" },
       ...prev,
     ]);
-    pushNotification(subj.icon, subj.color, "تم نشر: " + title + " لكل أولياء القسم");
     setNewLessonTitle("");
     setNewLessonDesc("");
+    fetch("/api/teacher/notifications")
+      .then((r) => r.json())
+      .then((d) => setNotifications(d.notifications || []));
   }
 
-  function handleSendNote() {
-    const student = students.find((s) => s.id === noteStudentId)!;
+  async function handleSendNote() {
+    const student = students.find((s) => s.id === noteStudentId);
     const noteType = NOTE_TYPES.find((t) => t.value === noteTypeValue)!;
     const text = noteText.trim();
-    if (!text) {
+    if (!student || !text) {
       alert("يرجى كتابة نص الملاحظة");
       return;
     }
+    const res = await fetch("/api/teacher/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ studentId: student.id, noteType: noteType.value, text }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || "تعذر إرسال الملاحظة");
+      return;
+    }
     setNotesFeed((prev) => [
+      { id: Date.now(), icon: noteType.icon, student: student.name, type: noteType.label.replace("ملاحظة ", ""), text, date: "الآن" },
       ...prev,
-      { icon: noteType.icon, student: student.name, type: noteType.label.replace("ملاحظة ", ""), text, date: "الآن" },
     ]);
-    pushNotification(noteType.icon, "var(--blush-dark)", `ملاحظة (${noteType.label}) لـ ${student.name}`);
     setNoteText("");
+    fetch("/api/teacher/notifications")
+      .then((r) => r.json())
+      .then((d) => setNotifications(d.notifications || []));
   }
 
-  function handleSaveAttendance() {
+  async function handleSaveAttendance() {
     if (!attDate) {
       alert("يرجى اختيار التاريخ");
       return;
     }
-    const entries = Object.entries(attendanceToday);
+    const entries = Object.entries(attendanceToday).map(([id, status]) => ({
+      studentId: +id,
+      status: status as AttStatus,
+    }));
     if (entries.length === 0) {
       alert("يرجى تحديد حالة كل تلميذ قبل الحفظ");
       return;
     }
-    entries.forEach(([id, status]) => {
-      const student = students.find((s) => s.id === +id)!;
-      const st = status as AttStatus;
-      pushNotification(
-        st === "present" ? "✓" : st === "absent" ? "✕" : "⏱",
-        st === "present" ? "var(--sage)" : st === "absent" ? "var(--danger)" : "var(--sun-dark)",
-        `حضور (${attDate}) — ${student.name}: ${ATT_LABELS[st]}`
-      );
-    });
-    alert("تم حفظ الحضور وإرسال الإشعارات لأولياء التلاميذ ✓");
+    setSavingAttendance(true);
+    try {
+      const res = await fetch("/api/teacher/attendance", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date: attDate, entries }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        alert(data.error || "تعذر حفظ الحضور");
+        return;
+      }
+      const notifRes = await fetch("/api/teacher/notifications");
+      const notifData = await notifRes.json();
+      setNotifications(notifData.notifications || []);
+      alert("تم حفظ الحضور وإرسال الإشعارات لأولياء التلاميذ ✓");
+    } finally {
+      setSavingAttendance(false);
+    }
   }
 
   const unreadCount = notifications.filter((n) => !n.read).length;
@@ -207,6 +288,12 @@ export default function TeacherPage() {
     { id: "schedule", label: "📅 جدول حصصي" },
   ];
 
+  if (loading) {
+    return (
+      <div style={{ padding: 40, fontFamily: "Almarai, sans-serif", direction: "rtl" }}>جاري التحميل...</div>
+    );
+  }
+
   return (
     <>
       <header className="topbar">
@@ -216,7 +303,7 @@ export default function TeacherPage() {
               <span>ط</span>
               <span>ف</span>
             </span>
-            فضاء الطفل <span className="demo-tag">نسخة تجريبية — الأستاذ</span>
+            فضاء الطفل <span className="demo-tag">لوحة الأستاذ</span>
           </div>
 
           <div className="row-right">
@@ -240,8 +327,8 @@ export default function TeacherPage() {
                   {notifications.length === 0 ? (
                     <div className="notif-empty">لا توجد إشعارات حاليًا.</div>
                   ) : (
-                    [...notifications].reverse().map((n, i) => (
-                      <div className="notif-item" key={i}>
+                    [...notifications].reverse().map((n) => (
+                      <div className="notif-item" key={n.id}>
                         <div className="notif-icon" style={{ background: n.color }}>
                           {n.icon}
                         </div>
@@ -255,6 +342,7 @@ export default function TeacherPage() {
                 </div>
               </div>
             </div>
+            <LogoutButton />
           </div>
         </div>
 
@@ -268,6 +356,15 @@ export default function TeacherPage() {
       </header>
 
       <main className="shell">
+        {loadError && <div className="login-error" style={{ marginBottom: 16 }}>⚠️ {loadError}</div>}
+        {!loadError && !classId && (
+          <div className="card">
+            <p className="hint" style={{ margin: 0 }}>
+              حسابك ماعندوش قسم مرتبط بيه بعد فقاعدة البيانات. تواصل مع الإدارة باش تربط حسابك بقسم (جدول <code>classes</code>، عمود <code>teacher_id</code>).
+            </p>
+          </div>
+        )}
+
         {activeTab === "students" && (
           <section className="page-fade">
             <div className="card">
@@ -279,6 +376,7 @@ export default function TeacherPage() {
               </div>
               <p className="hint">قائمة تلاميذ قسمك مع مجموع نقاطهم الحالي.</p>
               <div>
+                {students.length === 0 && <div className="empty-msg">لا يوجد تلاميذ فهاد القسم بعد.</div>}
                 {students.map((s) => (
                   <div className="student-row" key={s.id}>
                     {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -341,8 +439,8 @@ export default function TeacherPage() {
                 })}
               </div>
               <div className="admin-actions">
-                <button className="btn btn-sky" onClick={handleSaveAttendance}>
-                  💾 حفظ الحضور وإرسال الإشعارات
+                <button className="btn btn-sky" onClick={handleSaveAttendance} disabled={savingAttendance}>
+                  {savingAttendance ? "جاري الحفظ..." : "💾 حفظ الحضور وإرسال الإشعارات"}
                 </button>
               </div>
             </div>
@@ -362,8 +460,11 @@ export default function TeacherPage() {
               <div className="admin-grid">
                 <div>
                   <label>المادة</label>
-                  <select value={newLessonSubject} onChange={(e) => setNewLessonSubject(e.target.value)}>
-                    {SUBJECTS.map((s) => (
+                  <select
+                    value={newLessonSubject ?? ""}
+                    onChange={(e) => setNewLessonSubject(+e.target.value)}
+                  >
+                    {subjects.map((s) => (
                       <option value={s.id} key={s.id}>
                         {s.name}
                       </option>
@@ -400,8 +501,8 @@ export default function TeacherPage() {
                 {lessonsFeed.length === 0 ? (
                   <div className="empty-msg">لم تتم إضافة أي درس أو نشاط بعد.</div>
                 ) : (
-                  lessonsFeed.map((l, i) => (
-                    <div className="feed-item" key={i}>
+                  lessonsFeed.map((l) => (
+                    <div className="feed-item" key={l.id}>
                       <div className="feed-icon">{l.icon}</div>
                       <div className="feed-body">
                         <h3>{l.title}</h3>
@@ -430,7 +531,7 @@ export default function TeacherPage() {
               <div className="admin-grid">
                 <div>
                   <label>اختر التلميذ</label>
-                  <select value={noteStudentId} onChange={(e) => setNoteStudentId(+e.target.value)}>
+                  <select value={noteStudentId ?? ""} onChange={(e) => setNoteStudentId(+e.target.value)}>
                     {students.map((s) => (
                       <option value={s.id} key={s.id}>
                         {s.name}
@@ -469,8 +570,8 @@ export default function TeacherPage() {
                 {notesFeed.length === 0 ? (
                   <div className="empty-msg">لم يتم إرسال أي ملاحظة بعد.</div>
                 ) : (
-                  [...notesFeed].reverse().map((n, i) => (
-                    <div className="feed-item" key={i}>
+                  notesFeed.map((n) => (
+                    <div className="feed-item" key={n.id}>
                       <div className="feed-icon">{n.icon}</div>
                       <div className="feed-body">
                         <h3>{n.student}</h3>
@@ -494,6 +595,7 @@ export default function TeacherPage() {
                 </div>
                 <h2>جدول حصصي الأسبوعي</h2>
               </div>
+              <p className="hint">الجدول ثابت حاليًا.</p>
               <div style={{ overflowX: "auto" }}>
                 <table className="sched-table">
                   <tbody>
@@ -529,7 +631,7 @@ export default function TeacherPage() {
         )}
       </main>
 
-      <footer className="app-footer">هذه صفحة تجريبية للعرض فقط — جميع البيانات مؤقتة في المتصفح ولا يتم حفظها في أي قاعدة بيانات.</footer>
+      <footer className="app-footer"></footer>
     </>
   );
 }
