@@ -186,7 +186,6 @@ function LoginPageInner() {
           <div className="login-card">
             <div className="login-head">
               <h2>{isSignup ? "إنشاء حساب جديد" : "تسجيل الدخول"}</h2>
-              <span className="demo-tag">متصلة بقاعدة البيانات</span>
             </div>
 
             {/* Login / Signup toggle */}
@@ -333,23 +332,10 @@ function LoginPageInner() {
                 )}
               </p>
             </form>
-
-            {!isSignup && (
-              <div className="quick-demo">
-                <span>دخول سريع للتجربة (بعد تشغيل seed):</span>
-                <div className="quick-demo-btns">
-                  {ROLES.map((r) => (
-                    <button key={r.id} type="button" onClick={() => handleQuickDemo(r)}>
-                      {r.icon} {r.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
 
           <footer className="login-footer">
-            متصلة بقاعدة بيانات MySQL حقيقية (fadaa_al_tifl) — الحسابات والجلسات فعلية.
+                   الحسابات والجلسات فعلية.
           </footer>
         </div>
       </div>
