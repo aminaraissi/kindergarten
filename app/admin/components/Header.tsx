@@ -8,6 +8,9 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'students', label: '🧒 التلاميذ' },
   { key: 'teachers', label: '👩‍🏫 الأساتذة' },
   { key: 'classes', label: '🏫 الأقسام' },
+  { key: 'pricing', label: '💳 الأسعار' },
+  { key: 'events', label: '🗓️ الأحداث' },
+  { key: 'jobs', label: '💼 عروض العمل' },
   { key: 'messages', label: '📣 الإشعارات والرسائل' },
 ];
 

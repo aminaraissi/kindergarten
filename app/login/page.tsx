@@ -1,7 +1,14 @@
 "use client";
 
-import { useState, FormEvent, Suspense } from "react";
+import { useRef, useState, FormEvent, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import {
+  ChildInfo,
+  Guardian,
+  ParentInfo,
+  emptyChildInfo,
+  emptyParentInfo,
+} from "./register/types";
 
 /* =========================================================
    Types
@@ -55,6 +62,7 @@ const NEUTRAL = {
 };
 
 type Mode = "login" | "signup";
+const MAX_GUARDIANS = 2;
 
 function LoginPageInner() {
   const router = useRouter();
@@ -71,8 +79,20 @@ function LoginPageInner() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // ---- Child registration fields (shown only when signing up as "ولي أمر") ----
+  const [childPhoto, setChildPhoto] = useState<string | null>(null);
+  const [child, setChild] = useState<ChildInfo>(emptyChildInfo());
+  const [motherEnabled, setMotherEnabled] = useState(false);
+  const [mother, setMother] = useState<ParentInfo>(emptyParentInfo());
+  const [fatherEnabled, setFatherEnabled] = useState(false);
+  const [father, setFather] = useState<ParentInfo>(emptyParentInfo());
+  const [guardians, setGuardians] = useState<Guardian[]>([]);
+  const [contactEmail, setContactEmail] = useState("");
+  const nextGuardianId = useRef(1);
+
   const selectedRole = ROLES.find((r) => r.id === role)!;
   const isSignup = mode === "signup";
+  const isParentSignup = isSignup && role === "parent";
   const active = isSignup ? selectedRole : { label: "", icon: NEUTRAL.icon, color: NEUTRAL.color };
 
   function switchMode(next: Mode) {
@@ -86,6 +106,42 @@ function LoginPageInner() {
     const next = searchParams.get("next");
     router.push(next && next.startsWith("/") ? next : redirect);
     router.refresh();
+  }
+
+  function handleChildPhotoChange(file: File | undefined) {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setError("يرجى اختيار ملف صورة صالح.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => setChildPhoto(e.target?.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  function addGuardian() {
+    if (guardians.length >= MAX_GUARDIANS) return;
+    const id = nextGuardianId.current++;
+    setGuardians((prev) => [...prev, { id, name: "", lastname: "", dob: "", pob: "", phone: "", email: "" }]);
+  }
+
+  function updateGuardian(id: number, field: keyof Omit<Guardian, "id">, value: string) {
+    setGuardians((prev) => prev.map((g) => (g.id === id ? { ...g, [field]: value } : g)));
+  }
+
+  function removeGuardian(id: number) {
+    setGuardians((prev) => prev.filter((g) => g.id !== id));
+  }
+
+  function resetChildFields() {
+    setChildPhoto(null);
+    setChild(emptyChildInfo());
+    setMotherEnabled(false);
+    setMother(emptyParentInfo());
+    setFatherEnabled(false);
+    setFather(emptyParentInfo());
+    setGuardians([]);
+    setContactEmail("");
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -113,11 +169,66 @@ function LoginPageInner() {
       return;
     }
 
+    if (isParentSignup) {
+      if (
+        !child.name.trim() ||
+        !child.lastname.trim() ||
+        !child.dob ||
+        !child.pob.trim() ||
+        !child.address.trim() ||
+        !child.health.trim()
+      ) {
+        setError("يرجى تعبئة جميع معلومات الطفل المطلوبة");
+        return;
+      }
+      if (!motherEnabled && !fatherEnabled) {
+        setError("يرجى اختيار الأم أو الأب أو كليهما وتعبئة معلوماتهما");
+        return;
+      }
+      if (motherEnabled && (!mother.name.trim() || !mother.lastname.trim() || !mother.phone.trim())) {
+        setError("يرجى تعبئة معلومات الأم الأساسية (الاسم، اللقب، الهاتف)");
+        return;
+      }
+      if (fatherEnabled && (!father.name.trim() || !father.lastname.trim() || !father.phone.trim())) {
+        setError("يرجى تعبئة معلومات الأب الأساسية (الاسم، اللقب، الهاتف)");
+        return;
+      }
+      for (const g of guardians) {
+        if (!g.name.trim() || !g.lastname.trim() || !g.phone.trim()) {
+          setError("يرجى تعبئة معلومات جميع الكفلاء المضافين، أو إزالتهم");
+          return;
+        }
+      }
+      if (!contactEmail.trim()) {
+        setError("يرجى إدخال البريد الإلكتروني لاستلام وصل التسجيل");
+        return;
+      }
+      if (!/^\S+@\S+\.\S+$/.test(contactEmail.trim())) {
+        setError("صيغة البريد الإلكتروني لاستلام الوصل غير صحيحة");
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       const endpoint = isSignup ? "/api/auth/signup" : "/api/auth/login";
       const body = isSignup
-        ? { fullName: fullName.trim(), email: email.trim(), password, role }
+        ? {
+            fullName: fullName.trim(),
+            email: email.trim(),
+            password,
+            role,
+            ...(isParentSignup
+              ? {
+                  child: { ...child, photo: childPhoto },
+                  motherEnabled,
+                  mother: motherEnabled ? mother : null,
+                  fatherEnabled,
+                  father: fatherEnabled ? father : null,
+                  guardians: guardians.map(({ id, ...g }) => g),
+                }
+              : {}),
+          }
         : { email: email.trim(), password };
 
       const res = await fetch(endpoint, {
@@ -140,14 +251,6 @@ function LoginPageInner() {
       setError("تعذر الاتصال بالخادم، تأكد من الاتصال وحاول مرة أخرى");
       setLoading(false);
     }
-  }
-
-  function handleQuickDemo(r: RoleMeta) {
-    setMode("login");
-    setRole(r.id);
-    setEmail(r.demoEmail);
-    setPassword("demo1234");
-    setError("");
   }
 
   return (
@@ -186,6 +289,11 @@ function LoginPageInner() {
           <div className="login-card">
             <div className="login-head">
               <h2>{isSignup ? "إنشاء حساب جديد" : "تسجيل الدخول"}</h2>
+              {isParentSignup && (
+                <p className="head-hint">
+                  بصفتك وليّ أمر، سنحتاج أيضًا معلومات الطفل المراد تسجيله في نفس الخطوة.
+                </p>
+              )}
             </div>
 
             {/* Login / Signup toggle */}
@@ -231,7 +339,11 @@ function LoginPageInner() {
                   <select
                     id="accountType"
                     value={role}
-                    onChange={(e) => setRole(e.target.value as Role)}
+                    onChange={(e) => {
+                      const nextRole = e.target.value as Role;
+                      setRole(nextRole);
+                      if (nextRole !== "parent") resetChildFields();
+                    }}
                   >
                     {ROLES.map((r) => (
                       <option value={r.id} key={r.id}>
@@ -290,6 +402,185 @@ function LoginPageInner() {
                 </div>
               )}
 
+              {/* ================= Child registration (parent signup only) ================= */}
+              {isParentSignup && (
+                <>
+                  <div className="section-divider">
+                    <span className="section-num">1</span>
+                    <div>
+                      <h3>معلومات الطفل</h3>
+                      <span className="section-hint">بيانات الطفل المراد تسجيله</span>
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <label>
+                      صورة الطفل <span className="opt">(اختياري)</span>
+                    </label>
+                    <div className="photo-upload">
+                      <div
+                        className={`photo-preview ${childPhoto ? "has-image" : ""}`}
+                        style={childPhoto ? { backgroundImage: `url(${childPhoto})` } : undefined}
+                      >
+                        {!childPhoto && <span className="photo-placeholder">📷</span>}
+                      </div>
+                      <div className="photo-actions">
+                        <label className="photo-btn">
+                          اختيار صورة
+                          <input
+                            type="file"
+                            accept="image/*"
+                            style={{ display: "none" }}
+                            onChange={(e) => handleChildPhotoChange(e.target.files?.[0])}
+                          />
+                        </label>
+                        {childPhoto && (
+                          <button type="button" className="photo-remove-btn" onClick={() => setChildPhoto(null)}>
+                            إزالة الصورة
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid">
+                    <div className="field">
+                      <label>الاسم</label>
+                      <input type="text" value={child.name} onChange={(e) => setChild({ ...child, name: e.target.value })} />
+                    </div>
+                    <div className="field">
+                      <label>اللقب</label>
+                      <input type="text" value={child.lastname} onChange={(e) => setChild({ ...child, lastname: e.target.value })} />
+                    </div>
+                    <div className="field">
+                      <label>تاريخ الميلاد</label>
+                      <input type="date" value={child.dob} onChange={(e) => setChild({ ...child, dob: e.target.value })} />
+                    </div>
+                    <div className="field">
+                      <label>مكان الميلاد</label>
+                      <input type="text" value={child.pob} onChange={(e) => setChild({ ...child, pob: e.target.value })} />
+                    </div>
+                    <div className="field full">
+                      <label>العنوان</label>
+                      <input type="text" value={child.address} onChange={(e) => setChild({ ...child, address: e.target.value })} />
+                    </div>
+                    <div className="field full">
+                      <label>الحالة الصحية</label>
+                      <textarea
+                        placeholder="أمراض مزمنة، حساسية، أدوية يتناولها الطفل..."
+                        value={child.health}
+                        onChange={(e) => setChild({ ...child, health: e.target.value })}
+                      />
+                    </div>
+                    <div className="field full">
+                      <label>
+                        ملاحظة <span className="opt">(اختياري)</span>
+                      </label>
+                      <textarea
+                        placeholder="أي معلومة إضافية ترغبون في إخبارنا بها"
+                        value={child.note}
+                        onChange={(e) => setChild({ ...child, note: e.target.value })}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="section-divider">
+                    <span className="section-num">2</span>
+                    <div>
+                      <h3>معلومات الوالدين</h3>
+                      <span className="section-hint">اختر من سيتم تسجيل معلوماته</span>
+                    </div>
+                  </div>
+
+                  <div className="choice-row">
+                    <label className="choice">
+                      <input type="checkbox" checked={motherEnabled} onChange={(e) => setMotherEnabled(e.target.checked)} />
+                      <span className="box">🧡 الأم</span>
+                    </label>
+                    <label className="choice">
+                      <input type="checkbox" checked={fatherEnabled} onChange={(e) => setFatherEnabled(e.target.checked)} />
+                      <span className="box">💙 الأب</span>
+                    </label>
+                  </div>
+
+                  {motherEnabled && (
+                    <div className="parent-block">
+                      <h3>
+                        <span className="dot dot-mother" /> معلومات الأم
+                      </h3>
+                      <div className="grid">
+                        <div className="field"><label>الاسم</label><input type="text" value={mother.name} onChange={(e) => setMother({ ...mother, name: e.target.value })} /></div>
+                        <div className="field"><label>اللقب</label><input type="text" value={mother.lastname} onChange={(e) => setMother({ ...mother, lastname: e.target.value })} /></div>
+                        <div className="field"><label>تاريخ الميلاد</label><input type="date" value={mother.dob} onChange={(e) => setMother({ ...mother, dob: e.target.value })} /></div>
+                        <div className="field"><label>مكان الميلاد</label><input type="text" value={mother.pob} onChange={(e) => setMother({ ...mother, pob: e.target.value })} /></div>
+                        <div className="field"><label>رقم الهاتف</label><input type="tel" value={mother.phone} onChange={(e) => setMother({ ...mother, phone: e.target.value })} /></div>
+                        <div className="field"><label>البريد الإلكتروني</label><input type="email" value={mother.email} onChange={(e) => setMother({ ...mother, email: e.target.value })} /></div>
+                      </div>
+                    </div>
+                  )}
+
+                  {fatherEnabled && (
+                    <div className="parent-block">
+                      <h3>
+                        <span className="dot dot-father" /> معلومات الأب
+                      </h3>
+                      <div className="grid">
+                        <div className="field"><label>الاسم</label><input type="text" value={father.name} onChange={(e) => setFather({ ...father, name: e.target.value })} /></div>
+                        <div className="field"><label>اللقب</label><input type="text" value={father.lastname} onChange={(e) => setFather({ ...father, lastname: e.target.value })} /></div>
+                        <div className="field"><label>تاريخ الميلاد</label><input type="date" value={father.dob} onChange={(e) => setFather({ ...father, dob: e.target.value })} /></div>
+                        <div className="field"><label>مكان الميلاد</label><input type="text" value={father.pob} onChange={(e) => setFather({ ...father, pob: e.target.value })} /></div>
+                        <div className="field"><label>رقم الهاتف</label><input type="tel" value={father.phone} onChange={(e) => setFather({ ...father, phone: e.target.value })} /></div>
+                        <div className="field"><label>البريد الإلكتروني</label><input type="email" value={father.email} onChange={(e) => setFather({ ...father, email: e.target.value })} /></div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="section-divider">
+                    <span className="section-num">3</span>
+                    <div>
+                      <h3>الأشخاص المخوّل لهم اصطحاب الطفل</h3>
+                      <span className="section-hint">اختياري — بحد أقصى شخصين</span>
+                    </div>
+                  </div>
+
+                  <div className="pickup-note">
+                    يمكن لهؤلاء الأشخاص اصطحاب الطفل من الحضانة في حال تأخر الوالدين.
+                  </div>
+
+                  {guardians.map((g, idx) => (
+                    <div className="guardian-block" key={g.id}>
+                      <button type="button" className="remove-guardian" onClick={() => removeGuardian(g.id)}>
+                        إزالة ✕
+                      </button>
+                      <h3>معلومات الكفيل {idx + 1}</h3>
+                      <div className="grid">
+                        <div className="field"><label>الاسم</label><input type="text" value={g.name} onChange={(e) => updateGuardian(g.id, "name", e.target.value)} /></div>
+                        <div className="field"><label>اللقب</label><input type="text" value={g.lastname} onChange={(e) => updateGuardian(g.id, "lastname", e.target.value)} /></div>
+                        <div className="field"><label>تاريخ الميلاد</label><input type="date" value={g.dob} onChange={(e) => updateGuardian(g.id, "dob", e.target.value)} /></div>
+                        <div className="field"><label>مكان الميلاد</label><input type="text" value={g.pob} onChange={(e) => updateGuardian(g.id, "pob", e.target.value)} /></div>
+                        <div className="field"><label>رقم الهاتف</label><input type="tel" value={g.phone} onChange={(e) => updateGuardian(g.id, "phone", e.target.value)} /></div>
+                        <div className="field"><label>البريد الإلكتروني</label><input type="email" value={g.email} onChange={(e) => updateGuardian(g.id, "email", e.target.value)} /></div>
+                      </div>
+                    </div>
+                  ))}
+
+                  <button type="button" className="add-guardian-btn" disabled={guardians.length >= MAX_GUARDIANS} onClick={addGuardian}>
+                    ＋ إضافة كفيل
+                  </button>
+                  {guardians.length >= MAX_GUARDIANS && (
+                    <div className="guardian-limit-msg">تم بلوغ الحد الأقصى (شخصان).</div>
+                  )}
+
+                  <div className="section-divider">
+                    <span className="section-num">4</span>
+                    <div>
+                      <h3>إنشاء الحساب</h3>
+                      <span className="section-hint">البريد وكلمة المرور أعلاه سيُستخدمان لتسجيل الدخول لاحقًا</span>
+                    </div>
+                  </div>
+                </>
+              )}
+
               {!isSignup && (
                 <div className="field-row">
                   <label className="remember">
@@ -334,9 +625,7 @@ function LoginPageInner() {
             </form>
           </div>
 
-          <footer className="login-footer">
-                   الحسابات والجلسات فعلية.
-          </footer>
+          <footer className="login-footer">الحسابات والجلسات فعلية.</footer>
         </div>
       </div>
 
@@ -479,6 +768,8 @@ function LoginPageInner() {
           display: flex;
           flex-direction: column;
           justify-content: center;
+          max-height: 100dvh;
+          overflow-y: auto;
         }
 
         .login-card {
@@ -493,13 +784,11 @@ function LoginPageInner() {
           font-size: 24px;
           color: #3c3226;
         }
-        .demo-tag {
-          font-size: 11px;
-          background: #eaf5ee;
-          color: #2f6b45;
-          padding: 3px 9px;
-          border-radius: 999px;
-          font-weight: 600;
+        .head-hint {
+          margin: 0;
+          font-size: 12.5px;
+          color: #8a8271;
+          line-height: 1.6;
         }
 
         .mode-switch {
@@ -569,18 +858,30 @@ function LoginPageInner() {
           color: #5a5142;
           margin-bottom: 6px;
         }
-        .field input {
+        .field label .opt {
+          font-weight: 400;
+          color: #9a927e;
+          font-size: 11.5px;
+        }
+        .field input,
+        .field textarea {
           width: 100%;
           box-sizing: border-box;
           border: 1.5px solid #e7e3d8;
           border-radius: 12px;
           padding: 11px 14px;
           font-size: 14px;
+          font-family: inherit;
           background: #fdfcf9;
           outline: none;
           transition: border-color 0.15s ease;
         }
-        .field input:focus {
+        .field textarea {
+          resize: vertical;
+          min-height: 64px;
+        }
+        .field input:focus,
+        .field textarea:focus {
           border-color: var(--role-color);
         }
 
@@ -655,37 +956,233 @@ function LoginPageInner() {
           cursor: default;
         }
 
-        .quick-demo {
-          margin-top: 20px;
-          padding-top: 16px;
-          border-top: 1px dashed #eee;
-          font-size: 12px;
-          color: #999;
-        }
-        .quick-demo-btns {
-          display: flex;
-          gap: 6px;
-          margin-top: 8px;
-          flex-wrap: wrap;
-        }
-        .quick-demo-btns button {
-          border: 1px solid #eee;
-          background: #fafafa;
-          border-radius: 999px;
-          padding: 5px 11px;
-          font-size: 11.5px;
-          cursor: pointer;
-          color: #5a5142;
-        }
-        .quick-demo-btns button:hover {
-          background: #f2f0e9;
-        }
-
         .login-footer {
           margin-top: 18px;
           text-align: center;
           font-size: 10.5px;
           color: #b5ae9e;
+        }
+
+        /* ---------- child registration block (parent signup) ---------- */
+        .section-divider {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin: 22px 0 14px;
+          padding-top: 14px;
+          border-top: 1px dashed #eee6d6;
+        }
+        .section-divider:first-of-type {
+          border-top: none;
+          padding-top: 0;
+        }
+        .section-num {
+          flex: none;
+          width: 26px;
+          height: 26px;
+          border-radius: 8px;
+          background: var(--role-color);
+          color: #3c3226;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 800;
+          font-size: 12.5px;
+        }
+        .section-divider h3 {
+          margin: 0;
+          font-size: 14.5px;
+          color: #3c3226;
+        }
+        .section-hint {
+          display: block;
+          font-size: 11.5px;
+          color: #9a927e;
+          margin-top: 2px;
+        }
+
+        .grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+        }
+        .grid .full {
+          grid-column: 1 / -1;
+        }
+        @media (max-width: 560px) {
+          .grid {
+            grid-template-columns: 1fr;
+          }
+        }
+
+        .photo-upload {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          flex-wrap: wrap;
+        }
+        .photo-preview {
+          flex: none;
+          width: 68px;
+          height: 68px;
+          border-radius: 50%;
+          border: 2px dashed #e7e3d8;
+          background-color: #fdfcf9;
+          background-size: cover;
+          background-position: center;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .photo-preview.has-image {
+          border-style: solid;
+          border-color: var(--role-color);
+        }
+        .photo-placeholder {
+          font-size: 22px;
+          opacity: 0.5;
+        }
+        .photo-actions {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+        }
+        .photo-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          border: 1.5px dashed var(--role-color);
+          color: #5a5142;
+          font-weight: 700;
+          font-size: 12.5px;
+          padding: 8px 14px;
+          border-radius: 10px;
+          cursor: pointer;
+        }
+        .photo-remove-btn {
+          background: none;
+          border: none;
+          color: #b3261e;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .choice-row {
+          display: flex;
+          gap: 10px;
+          margin-bottom: 16px;
+          flex-wrap: wrap;
+        }
+        .choice {
+          flex: 1;
+          min-width: 120px;
+          position: relative;
+        }
+        .choice input {
+          position: absolute;
+          opacity: 0;
+          width: 100%;
+          height: 100%;
+          cursor: pointer;
+          inset: 0;
+        }
+        .choice .box {
+          border: 1.5px solid #e7e3d8;
+          border-radius: 12px;
+          padding: 12px;
+          text-align: center;
+          font-weight: 700;
+          font-size: 13px;
+          background: #fdfcf9;
+        }
+        .choice input:checked + .box {
+          border-color: var(--role-color);
+          background: rgba(0, 0, 0, 0.03);
+        }
+
+        .parent-block {
+          border: 1.5px dashed #e7e3d8;
+          border-radius: 12px;
+          padding: 16px 14px;
+          margin-bottom: 14px;
+        }
+        .parent-block h3 {
+          font-size: 13.5px;
+          margin: 0 0 12px;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          display: inline-block;
+        }
+        .dot-mother {
+          background: #e8927c;
+        }
+        .dot-father {
+          background: #7fa8c9;
+        }
+
+        .pickup-note {
+          background: rgba(244, 213, 141, 0.25);
+          border: 1px solid rgba(244, 213, 141, 0.6);
+          border-radius: 10px;
+          padding: 9px 12px;
+          font-size: 12px;
+          color: #6b5313;
+          margin-bottom: 14px;
+        }
+
+        .guardian-block {
+          border: 1.5px solid #e7e3d8;
+          border-radius: 12px;
+          padding: 16px 14px;
+          margin-bottom: 14px;
+          position: relative;
+          background: #fdfcf9;
+        }
+        .guardian-block h3 {
+          font-size: 13.5px;
+          margin: 0 0 12px;
+        }
+        .remove-guardian {
+          position: absolute;
+          top: 12px;
+          left: 12px;
+          background: none;
+          border: none;
+          color: #b3261e;
+          font-size: 12px;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .add-guardian-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: none;
+          border: 1.5px dashed var(--role-color);
+          color: #5a5142;
+          font-weight: 700;
+          font-size: 13px;
+          padding: 10px 16px;
+          border-radius: 10px;
+          cursor: pointer;
+        }
+        .add-guardian-btn:disabled {
+          opacity: 0.4;
+          cursor: not-allowed;
+        }
+        .guardian-limit-msg {
+          font-size: 12px;
+          color: #9a927e;
+          margin-top: 8px;
         }
 
         @media (max-width: 760px) {

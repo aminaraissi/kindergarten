@@ -8,11 +8,18 @@ import StudentsTab from './components/StudentsTab';
 import TeachersTab from './components/TeachersTab';
 import ClassesTab from './components/ClassesTab';
 import MessagesTab from './components/MessagesTab';
+import PricingTab from './components/PricingTab';
+import EventsTab from './components/EventsTab';
+import JobsTab from './components/JobsTab';
 import type {
   ActivityLogItem,
   ClassItem,
+  EventItem,
+  JobApplication,
+  JobListing,
   LogTarget,
   MessageLogItem,
+  PricingPlan,
   Student,
   TabKey,
   Teacher,
@@ -30,10 +37,24 @@ export default function AdminDashboardPage() {
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [activityLog, setActivityLog] = useState<ActivityLogItem[]>([]);
   const [messagesLog, setMessagesLog] = useState<MessageLogItem[]>([]);
+  const [pricingPlans, setPricingPlans] = useState<PricingPlan[]>([]);
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [jobs, setJobs] = useState<JobListing[]>([]);
+  const [applications, setApplications] = useState<JobApplication[]>([]);
 
   const [highlightTarget, setHighlightTarget] = useState<LogTarget | null>(null);
 
-  const nextIds = useRef({ students: 1, teachers: 1, classes: 1, log: 1, messages: 1 });
+  const nextIds = useRef({
+    students: 1,
+    teachers: 1,
+    classes: 1,
+    log: 1,
+    messages: 1,
+    pricing: 1,
+    events: 1,
+    jobs: 1,
+    applications: 1,
+  });
 
   function makeTarget(page: TabKey, id?: number, containerId?: string): LogTarget {
     if (id === undefined) return { page };
@@ -219,6 +240,87 @@ export default function AdminDashboardPage() {
     pushLog('👩‍🏫', 'var(--sky-dark)', `رسالة للأساتذة (${audienceLabel}): ${text}`, makeTarget('messages', id, 'messages-log'));
   }
 
+  /* ---------------- Pricing plans ---------------- */
+  function addPricingPlan(data: Omit<PricingPlan, 'id'>) {
+    const id = nextIds.current.pricing++;
+    setPricingPlans((prev) => [...prev, { id, ...data }]);
+    pushLog('💳', 'var(--sun-dark)', `تمت إضافة باقة جديدة: ${data.name}`, makeTarget('pricing', id, 'list-pricing'));
+  }
+
+  function updatePricingPlan(id: number, patch: Partial<PricingPlan>) {
+    setPricingPlans((prev) => prev.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    const p = pricingPlans.find((x) => x.id === id);
+    pushLog('💳', 'var(--sun-dark)', `تم تعديل باقة: ${patch.name ?? p?.name ?? ''}`, makeTarget('pricing', id, 'list-pricing'));
+  }
+
+  function deletePricingPlan(id: number) {
+    const p = pricingPlans.find((x) => x.id === id);
+    setPricingPlans((prev) => prev.filter((x) => x.id !== id));
+    pushLog('🗑️', 'var(--ink-soft)', `تم حذف باقة: ${p?.name}`, makeTarget('pricing'));
+  }
+
+  /* ---------------- Events ---------------- */
+  function addEvent(data: Omit<EventItem, 'id'>) {
+    const id = nextIds.current.events++;
+    setEvents((prev) => [...prev, { id, ...data }]);
+    pushLog('🗓️', 'var(--sky)', `تمت إضافة حدث جديد: ${data.title}`, makeTarget('events', id, 'list-events'));
+  }
+
+  function updateEvent(id: number, patch: Partial<EventItem>) {
+    setEvents((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    const e = events.find((x) => x.id === id);
+    pushLog('🗓️', 'var(--sky)', `تم تعديل حدث: ${patch.title ?? e?.title ?? ''}`, makeTarget('events', id, 'list-events'));
+  }
+
+  function deleteEvent(id: number) {
+    const e = events.find((x) => x.id === id);
+    setEvents((prev) => prev.filter((x) => x.id !== id));
+    pushLog('🗑️', 'var(--ink-soft)', `تم حذف حدث: ${e?.title}`, makeTarget('events'));
+  }
+
+  /* ---------------- Jobs & applications ---------------- */
+  function addJob(data: Omit<JobListing, 'id' | 'status'>) {
+    const id = nextIds.current.jobs++;
+    setJobs((prev) => [...prev, { id, status: 'open', ...data }]);
+    pushLog('💼', 'var(--blush)', `تمت إضافة عرض عمل جديد: ${data.title}`, makeTarget('jobs', id, 'list-jobs'));
+  }
+
+  function updateJob(id: number, patch: Partial<JobListing>) {
+    setJobs((prev) => prev.map((j) => (j.id === id ? { ...j, ...patch } : j)));
+    const j = jobs.find((x) => x.id === id);
+    pushLog('💼', 'var(--blush)', `تم تعديل عرض عمل: ${patch.title ?? j?.title ?? ''}`, makeTarget('jobs', id, 'list-jobs'));
+  }
+
+  function deleteJob(id: number) {
+    const j = jobs.find((x) => x.id === id);
+    setJobs((prev) => prev.filter((x) => x.id !== id));
+    pushLog('🗑️', 'var(--ink-soft)', `تم حذف عرض عمل: ${j?.title}`, makeTarget('jobs'));
+  }
+
+  function toggleJobStatus(id: number) {
+    const j = jobs.find((x) => x.id === id);
+    const nextStatus = j?.status === 'open' ? 'closed' : 'open';
+    setJobs((prev) => prev.map((x) => (x.id === id ? { ...x, status: nextStatus } : x)));
+    pushLog('💼', 'var(--blush)', `${nextStatus === 'closed' ? 'تم إغلاق' : 'تمت إعادة فتح'} عرض: ${j?.title}`, makeTarget('jobs', id, 'list-jobs'));
+  }
+
+  // Called whenever a candidate submits the public application form.
+  // Wire this to a real API route / Web3Forms webhook once the public
+  // "jobs" section on the homepage posts applications to your backend.
+  function receiveApplication(data: Omit<JobApplication, 'id' | 'time' | 'read'>) {
+    const id = nextIds.current.applications++;
+    setApplications((prev) => [...prev, { id, time: 'الآن', read: false, ...data }]);
+    pushLog('📥', 'var(--sage)', `طلب توظيف جديد من: ${data.applicantName}`, makeTarget('jobs', undefined, 'list-applications'));
+  }
+
+  function markApplicationRead(id: number) {
+    setApplications((prev) => prev.map((a) => (a.id === id ? { ...a, read: true } : a)));
+  }
+
+  function deleteApplication(id: number) {
+    setApplications((prev) => prev.filter((a) => a.id !== id));
+  }
+
   /* ---------------- Automatic payment reminders ----------------
      Scans active students and sends a one-time reminder once their
      next payment is due within a week. */
@@ -314,6 +416,37 @@ export default function AdminDashboardPage() {
             onSave={updateClass}
             onAdd={addClass}
             onAssignStudent={assignStudentToClass}
+          />
+        )}
+
+        {activeTab === 'pricing' && (
+          <PricingTab
+            plans={pricingPlans}
+            onAdd={addPricingPlan}
+            onSave={updatePricingPlan}
+            onDelete={deletePricingPlan}
+          />
+        )}
+
+        {activeTab === 'events' && (
+          <EventsTab
+            events={events}
+            onAdd={addEvent}
+            onSave={updateEvent}
+            onDelete={deleteEvent}
+          />
+        )}
+
+        {activeTab === 'jobs' && (
+          <JobsTab
+            jobs={jobs}
+            applications={applications}
+            onAdd={addJob}
+            onSave={updateJob}
+            onDelete={deleteJob}
+            onToggleStatus={toggleJobStatus}
+            onMarkApplicationRead={markApplicationRead}
+            onDeleteApplication={deleteApplication}
           />
         )}
 

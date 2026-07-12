@@ -91,7 +91,57 @@ export interface PaymentInfo {
   daysRemaining: number | null;
 }
 
-export type TabKey = 'stats' | 'students' | 'teachers' | 'classes' | 'messages';
+export interface PricingPlan {
+  id: number;
+  name: string;
+  price: string;
+  period: string;
+  desc: string;
+  featured: boolean;
+  features: string[];
+}
+
+export interface EventItem {
+  id: number;
+  day: string;
+  month: string;
+  title: string;
+  desc: string;
+  tag: string;
+}
+
+export type JobStatus = 'open' | 'closed';
+
+export interface JobListing {
+  id: number;
+  title: string;
+  type: string;
+  location: string;
+  desc: string;
+  status: JobStatus;
+}
+
+export interface JobApplication {
+  id: number;
+  jobId: number | null;
+  jobTitle: string;
+  applicantName: string;
+  phone: string;
+  email: string;
+  message: string;
+  time: string;
+  read: boolean;
+}
+
+export type TabKey =
+  | 'stats'
+  | 'students'
+  | 'teachers'
+  | 'classes'
+  | 'messages'
+  | 'pricing'
+  | 'events'
+  | 'jobs';
 
 export const STATUS_LABEL: Record<EntityStatus, string> = {
   pending: 'قيد الانتظار',
