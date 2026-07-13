@@ -226,6 +226,7 @@ function LoginPageInner() {
                   fatherEnabled,
                   father: fatherEnabled ? father : null,
                   guardians: guardians.map(({ id, ...g }) => g),
+                  contactEmail: contactEmail.trim(),
                 }
               : {}),
           }
@@ -404,7 +405,7 @@ function LoginPageInner() {
 
               {/* ================= Child registration (parent signup only) ================= */}
               {isParentSignup && (
-                <>
+                <div className="child-reg-wrap">
                   <div className="section-divider">
                     <span className="section-num">1</span>
                     <div>
@@ -574,11 +575,32 @@ function LoginPageInner() {
                   <div className="section-divider">
                     <span className="section-num">4</span>
                     <div>
+                      <h3>إرسال وصل التسجيل</h3>
+                      <span className="section-hint">سيتم إرسال وصل التسجيل إلى هذا البريد</span>
+                    </div>
+                  </div>
+
+                  <div className="field">
+                    <label>البريد الإلكتروني لاستلام وصل التسجيل</label>
+                    <input
+                      type="email"
+                      value={contactEmail}
+                      onChange={(e) => setContactEmail(e.target.value)}
+                      placeholder="example@domain.com"
+                    />
+                  </div>
+                  <p className="email-note">
+                    سيصلكم وصل التسجيل على هذا البريد، ويُقدَّم عند الدفع مباشرة في مقر المدرسة لإتمام قبول الطفل.
+                  </p>
+
+                  <div className="section-divider">
+                    <span className="section-num">5</span>
+                    <div>
                       <h3>إنشاء الحساب</h3>
                       <span className="section-hint">البريد وكلمة المرور أعلاه سيُستخدمان لتسجيل الدخول لاحقًا</span>
                     </div>
                   </div>
-                </>
+                </div>
               )}
 
               {!isSignup && (
@@ -851,20 +873,21 @@ function LoginPageInner() {
         .field {
           margin-bottom: 14px;
         }
-        .field label {
+        .field > label {
           display: block;
           font-size: 12.5px;
           font-weight: 600;
           color: #5a5142;
           margin-bottom: 6px;
         }
-        .field label .opt {
+        .field > label .opt {
           font-weight: 400;
           color: #9a927e;
           font-size: 11.5px;
         }
-        .field input,
-        .field textarea {
+        .field > input,
+        .field > textarea,
+        .pass-wrap input {
           width: 100%;
           box-sizing: border-box;
           border: 1.5px solid #e7e3d8;
@@ -876,12 +899,13 @@ function LoginPageInner() {
           outline: none;
           transition: border-color 0.15s ease;
         }
-        .field textarea {
+        .field > textarea {
           resize: vertical;
           min-height: 64px;
         }
-        .field input:focus,
-        .field textarea:focus {
+        .field > input:focus,
+        .field > textarea:focus,
+        .pass-wrap input:focus {
           border-color: var(--role-color);
         }
 
@@ -972,9 +996,10 @@ function LoginPageInner() {
           padding-top: 14px;
           border-top: 1px dashed #eee6d6;
         }
-        .section-divider:first-of-type {
+        .child-reg-wrap > .section-divider:first-child {
           border-top: none;
           padding-top: 0;
+          margin-top: 8px;
         }
         .section-num {
           flex: none;
@@ -1183,6 +1208,13 @@ function LoginPageInner() {
           font-size: 12px;
           color: #9a927e;
           margin-top: 8px;
+        }
+
+        .email-note {
+          font-size: 12px;
+          color: #9a927e;
+          margin: -8px 0 16px;
+          line-height: 1.6;
         }
 
         @media (max-width: 760px) {
